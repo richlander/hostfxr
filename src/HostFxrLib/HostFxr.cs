@@ -16,44 +16,52 @@ public static unsafe class HostFxr
 
     static HostFxr()
     {
-        s_dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-
-        if (string.IsNullOrEmpty(s_dotnetRoot))
+        try
         {
-            string dotnetExe = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-            string? pathVar = Environment.GetEnvironmentVariable("PATH");
-            if (pathVar is not null)
+            s_dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+
+            if (string.IsNullOrEmpty(s_dotnetRoot))
             {
-                char sep = OperatingSystem.IsWindows() ? ';' : ':';
-                foreach (string dir in pathVar.Split(sep, StringSplitOptions.RemoveEmptyEntries))
+                string dotnetExe = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
+                string? pathVar = Environment.GetEnvironmentVariable("PATH");
+                if (pathVar is not null)
                 {
-                    string candidate = Path.Combine(dir, dotnetExe);
-                    if (File.Exists(candidate))
+                    char sep = OperatingSystem.IsWindows() ? ';' : ':';
+                    foreach (string dir in pathVar.Split(sep, StringSplitOptions.RemoveEmptyEntries))
                     {
-                        var info = new FileInfo(candidate);
-                        string resolved = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
-                            ?? candidate;
-                        s_dotnetRoot = Path.GetDirectoryName(resolved);
-                        break;
+                        string candidate = Path.Combine(dir, dotnetExe);
+                        if (File.Exists(candidate))
+                        {
+                            var info = new FileInfo(candidate);
+                            string resolved = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                                ?? candidate;
+                            s_dotnetRoot = Path.GetDirectoryName(resolved);
+                            break;
+                        }
                     }
                 }
             }
-        }
 
-        if (string.IsNullOrEmpty(s_dotnetRoot))
+            if (string.IsNullOrEmpty(s_dotnetRoot))
+            {
+                if (OperatingSystem.IsMacOS())
+                    s_dotnetRoot = "/usr/local/share/dotnet";
+                else if (OperatingSystem.IsWindows())
+                    s_dotnetRoot = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
+                else
+                    s_dotnetRoot = "/usr/share/dotnet";
+            }
+
+            string? path = FindHostFxrPath();
+            if (path is not null)
+                NativeLibrary.TryLoad(path, out s_handle);
+        }
+        catch
         {
-            if (OperatingSystem.IsMacOS())
-                s_dotnetRoot = "/usr/local/share/dotnet";
-            else if (OperatingSystem.IsWindows())
-                s_dotnetRoot = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
-            else
-                s_dotnetRoot = "/usr/share/dotnet";
+            // Swallow filesystem/permission errors so the type remains usable.
+            // IsLoaded will be false and callers can check that.
         }
-
-        string? path = FindHostFxrPath();
-        if (path is not null)
-            NativeLibrary.TryLoad(path, out s_handle);
     }
 
     /// <summary>The discovered dotnet root directory.</summary>
@@ -350,7 +358,7 @@ public static unsafe class HostFxr
     [ThreadStatic]
     private static List<string>? t_sdkDirs;
 
-    public static string[] GetAvailableSdkDirs(string? exeDir = null)
+    public static AvailableSdksResult GetAvailableSdkDirs(string? exeDir = null)
     {
         ThrowIfNotLoaded();
 
@@ -359,10 +367,7 @@ public static unsafe class HostFxr
         try
         {
             int rc = GetAvailableSdks(exeDirPtr, &OnAvailableSdks);
-            if (rc < 0)
-                throw new InvalidOperationException(
-                    $"hostfxr_get_available_sdks failed with 0x{unchecked((uint)rc):X8}");
-            return t_sdkDirs.ToArray();
+            return new AvailableSdksResult { StatusCode = rc, SdkDirs = t_sdkDirs.ToArray() };
         }
         finally
         {

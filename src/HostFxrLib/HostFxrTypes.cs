@@ -194,3 +194,37 @@ public sealed class FrameworkResolutionResult
 /// A single resolved or unresolved framework entry.
 /// </summary>
 public sealed record ResolvedFramework(string Name, string RequestedVersion, string ResolvedVersion, string ResolvedPath);
+
+/// <summary>
+/// Result of querying available SDKs via <see cref="HostFxr.GetAvailableSdkDirs"/>.
+/// </summary>
+public sealed class AvailableSdksResult
+{
+    internal AvailableSdksResult() { }
+    public int StatusCode { get; internal set; }
+    public IReadOnlyList<string> SdkDirs { get; init; } = [];
+}
+
+/// <summary>
+/// Disposable wrapper for a hostfxr host context handle.
+/// Calls <see cref="HostFxr.Close"/> on dispose.
+/// </summary>
+public sealed class HostContextHandle : IDisposable
+{
+    private nint _handle;
+
+    internal HostContextHandle(nint handle) => _handle = handle;
+
+    /// <summary>The raw handle value, or zero if disposed.</summary>
+    public nint Value => _handle;
+
+    /// <summary>Whether the handle is valid (non-zero and not disposed).</summary>
+    public bool IsValid => _handle != 0;
+
+    public void Dispose()
+    {
+        nint h = Interlocked.Exchange(ref _handle, 0);
+        if (h != 0)
+            HostFxr.Close(h);
+    }
+}
