@@ -159,6 +159,7 @@ public sealed record FrameworkInfo(string Name, string Version, string Path);
 /// </summary>
 public sealed class EnvironmentInfo
 {
+    public int StatusCode { get; internal set; }
     public string HostFxrVersion { get; init; } = "";
     public string HostFxrCommitHash { get; init; } = "";
     public IReadOnlyList<SdkInfo> Sdks { get; init; } = [];
@@ -170,6 +171,8 @@ public sealed class EnvironmentInfo
 /// </summary>
 public sealed class SdkResolutionResult
 {
+    internal SdkResolutionResult() { }
+    public int StatusCode { get; internal set; }
     public string? ResolvedSdkDir { get; internal set; }
     public string? GlobalJsonPath { get; internal set; }
     public string? RequestedVersion { get; internal set; }
@@ -181,6 +184,8 @@ public sealed class SdkResolutionResult
 /// </summary>
 public sealed class FrameworkResolutionResult
 {
+    internal FrameworkResolutionResult() { }
+    public int StatusCode { get; internal set; }
     public IReadOnlyList<ResolvedFramework> Resolved { get; init; } = [];
     public IReadOnlyList<ResolvedFramework> Unresolved { get; init; } = [];
 }

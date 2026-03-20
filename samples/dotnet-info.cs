@@ -89,7 +89,7 @@ else
 // --- global.json ---
 Console.WriteLine();
 Console.WriteLine("global.json file:");
-var sdkResult = HostFxr.ResolveSdk(dotnetRoot, Environment.CurrentDirectory);
+var sdkResult = HostFxr.ResolveSdkInfo(dotnetRoot, Environment.CurrentDirectory);
 switch (sdkResult.GlobalJsonState)
 {
     case GlobalJsonState.Valid:

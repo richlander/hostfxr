@@ -12,12 +12,14 @@ public sealed unsafe class ErrorCapture : IDisposable
     [ThreadStatic]
     private static ErrorCapture? t_current;
 
+    private readonly ErrorCapture? _previous;
     private readonly nint _previousWriter;
     private readonly List<string> _messages = [];
     private bool _disposed;
 
     internal ErrorCapture()
     {
+        _previous = t_current;
         t_current = this;
         _previousWriter = HostFxr.SetErrorWriter(&OnError);
     }
@@ -54,6 +56,6 @@ public sealed unsafe class ErrorCapture : IDisposable
         if (_disposed) return;
         _disposed = true;
         HostFxr.SetErrorWriter((delegate* unmanaged[Cdecl]<nint, void>)_previousWriter);
-        t_current = null;
+        t_current = _previous;
     }
 }

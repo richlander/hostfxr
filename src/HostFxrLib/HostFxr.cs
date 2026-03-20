@@ -228,22 +228,22 @@ public static unsafe class HostFxr
     {
         ThrowIfNotLoaded();
 
-        EnvironmentInfo? result = null;
-        var handle = GCHandle.Alloc(new StrongBox<EnvironmentInfo?>(null));
+        dotnetRoot ??= s_dotnetRoot;
 
+        var handle = GCHandle.Alloc(new StrongBox<EnvironmentInfo?>(null));
         nint rootPtr = dotnetRoot is not null ? PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot) : 0;
         try
         {
-            GetDotnetEnvironmentInfo(rootPtr, 0, &OnEnvironmentInfo, (nint)handle);
-            result = ((StrongBox<EnvironmentInfo?>)handle.Target!).Value;
+            int rc = GetDotnetEnvironmentInfo(rootPtr, 0, &OnEnvironmentInfo, (nint)handle);
+            var result = ((StrongBox<EnvironmentInfo?>)handle.Target!).Value ?? new EnvironmentInfo();
+            result.StatusCode = rc;
+            return result;
         }
         finally
         {
             PlatformStringMarshaller.Free(rootPtr);
             handle.Free();
         }
-
-        return result ?? new EnvironmentInfo();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -285,7 +285,7 @@ public static unsafe class HostFxr
     [ThreadStatic]
     private static SdkResolutionResult? t_sdkResult;
 
-    public static SdkResolutionResult ResolveSdk(string? exeDir = null, string? workingDir = null,
+    public static SdkResolutionResult ResolveSdkInfo(string? exeDir = null, string? workingDir = null,
         ResolveSdk2Flags flags = ResolveSdk2Flags.None)
     {
         ThrowIfNotLoaded();
@@ -297,7 +297,7 @@ public static unsafe class HostFxr
         nint workingDirPtr = workingDir is not null ? PlatformStringMarshaller.ConvertToUnmanaged(workingDir) : 0;
         try
         {
-            ResolveSdk2(exeDirPtr, workingDirPtr, (int)flags, &OnResolveSdk2Result);
+            result.StatusCode = ResolveSdk2(exeDirPtr, workingDirPtr, (int)flags, &OnResolveSdk2Result);
         }
         finally
         {
@@ -358,7 +358,10 @@ public static unsafe class HostFxr
         nint exeDirPtr = exeDir is not null ? PlatformStringMarshaller.ConvertToUnmanaged(exeDir) : 0;
         try
         {
-            GetAvailableSdks(exeDirPtr, &OnAvailableSdks);
+            int rc = GetAvailableSdks(exeDirPtr, &OnAvailableSdks);
+            if (rc < 0)
+                throw new InvalidOperationException(
+                    $"hostfxr_get_available_sdks failed with 0x{unchecked((uint)rc):X8}");
             return t_sdkDirs.ToArray();
         }
         finally
@@ -407,8 +410,9 @@ public static unsafe class HostFxr
 
         try
         {
-            ResolveFrameworksForRuntimeConfig(pathPtr, paramsPtr, &OnResolveFrameworks, (nint)handle);
-            result = ((StrongBox<FrameworkResolutionResult?>)handle.Target!).Value;
+            int rc = ResolveFrameworksForRuntimeConfig(pathPtr, paramsPtr, &OnResolveFrameworks, (nint)handle);
+            result = ((StrongBox<FrameworkResolutionResult?>)handle.Target!).Value ?? new FrameworkResolutionResult();
+            result.StatusCode = rc;
         }
         finally
         {
@@ -417,7 +421,7 @@ public static unsafe class HostFxr
             handle.Free();
         }
 
-        return result ?? new FrameworkResolutionResult();
+        return result;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
