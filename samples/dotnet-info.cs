@@ -92,17 +92,14 @@ Console.WriteLine("global.json file:");
 var sdkResult = HostFxr.ResolveSdk(dotnetRoot, Environment.CurrentDirectory);
 switch (sdkResult.GlobalJsonState)
 {
-    case "not_found":
-        Console.WriteLine("  Not found");
-        break;
-    case "valid":
+    case GlobalJsonState.Valid:
         Console.WriteLine($"  {sdkResult.GlobalJsonPath}");
         break;
+    case GlobalJsonState.NotFound:
+        Console.WriteLine("  Not found");
+        break;
     default:
-        if (sdkResult.GlobalJsonPath is not null)
-            Console.WriteLine($"  Invalid [{sdkResult.GlobalJsonPath}]");
-        else
-            Console.WriteLine("  Not found");
+        Console.WriteLine($"  Invalid [{sdkResult.GlobalJsonPath}]");
         break;
 }
 

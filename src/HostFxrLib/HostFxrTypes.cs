@@ -41,6 +41,23 @@ public enum ResolveSdk2ResultKey : int
     GlobalJsonState = 3,
 }
 
+/// <summary>
+/// State of the global.json file as reported by <see cref="HostFxr.ResolveSdk2"/>.
+/// </summary>
+public enum GlobalJsonState
+{
+    /// <summary>No global.json was found.</summary>
+    NotFound,
+    /// <summary>global.json was found and the requested SDK resolved.</summary>
+    Valid,
+    /// <summary>global.json was found but the requested SDK is not installed, and rollforward is disallowed.</summary>
+    InvalidDataNoFallback,
+    /// <summary>global.json exists but contains invalid JSON.</summary>
+    InvalidJson,
+    /// <summary>The state string from hostfxr was not recognized.</summary>
+    Unknown,
+}
+
 // ---- Native structs ----
 
 /// <summary>
@@ -156,7 +173,7 @@ public sealed class SdkResolutionResult
     public string? ResolvedSdkDir { get; internal set; }
     public string? GlobalJsonPath { get; internal set; }
     public string? RequestedVersion { get; internal set; }
-    public string? GlobalJsonState { get; internal set; }
+    public GlobalJsonState GlobalJsonState { get; internal set; }
 }
 
 /// <summary>

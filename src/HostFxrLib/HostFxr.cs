@@ -10,26 +10,54 @@ namespace HostFxrLib;
 public static unsafe class HostFxr
 {
     private static string? s_dotnetRoot;
-    private static bool s_initialized;
+
+    // Intentionally never freed — hostfxr lives for the process lifetime.
     private static nint s_handle;
 
     static HostFxr()
     {
-        EnsureInitialized();
+        s_dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+
+        if (string.IsNullOrEmpty(s_dotnetRoot))
+        {
+            string dotnetExe = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
+            string? pathVar = Environment.GetEnvironmentVariable("PATH");
+            if (pathVar is not null)
+            {
+                char sep = OperatingSystem.IsWindows() ? ';' : ':';
+                foreach (string dir in pathVar.Split(sep, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string candidate = Path.Combine(dir, dotnetExe);
+                    if (File.Exists(candidate))
+                    {
+                        var info = new FileInfo(candidate);
+                        string resolved = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                            ?? candidate;
+                        s_dotnetRoot = Path.GetDirectoryName(resolved);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (string.IsNullOrEmpty(s_dotnetRoot))
+        {
+            if (OperatingSystem.IsMacOS())
+                s_dotnetRoot = "/usr/local/share/dotnet";
+            else if (OperatingSystem.IsWindows())
+                s_dotnetRoot = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
+            else
+                s_dotnetRoot = "/usr/share/dotnet";
+        }
+
         string? path = FindHostFxrPath();
         if (path is not null)
             NativeLibrary.TryLoad(path, out s_handle);
     }
 
     /// <summary>The discovered dotnet root directory.</summary>
-    public static string? DotnetRoot
-    {
-        get
-        {
-            EnsureInitialized();
-            return s_dotnetRoot;
-        }
-    }
+    public static string? DotnetRoot => s_dotnetRoot;
 
     /// <summary>Whether hostfxr was successfully loaded.</summary>
     public static bool IsLoaded => s_handle != 0;
@@ -249,8 +277,11 @@ public static unsafe class HostFxr
 
     /// <summary>
     /// Resolve SDK location and global.json info.
-    /// Uses thread-local storage since hostfxr_resolve_sdk2 doesn't support a context pointer.
     /// </summary>
+    /// <remarks>
+    /// Uses thread-local storage because hostfxr_resolve_sdk2's callback has no context
+    /// parameter. This assumes hostfxr invokes the callback on the calling thread.
+    /// </remarks>
     [ThreadStatic]
     private static SdkResolutionResult? t_sdkResult;
 
@@ -297,7 +328,14 @@ public static unsafe class HostFxr
                 result.RequestedVersion = str;
                 break;
             case ResolveSdk2ResultKey.GlobalJsonState:
-                result.GlobalJsonState = str;
+                result.GlobalJsonState = str switch
+                {
+                    "not_found" => GlobalJsonState.NotFound,
+                    "valid" => GlobalJsonState.Valid,
+                    "__invalid_data_no_fallback" => GlobalJsonState.InvalidDataNoFallback,
+                    "invalid_json" => GlobalJsonState.InvalidJson,
+                    _ => GlobalJsonState.Unknown,
+                };
                 break;
         }
     }
@@ -305,6 +343,10 @@ public static unsafe class HostFxr
     /// <summary>
     /// Get all available SDK directories.
     /// </summary>
+    /// <remarks>
+    /// Uses thread-local storage because hostfxr_get_available_sdks's callback has no context
+    /// parameter. This assumes hostfxr invokes the callback on the calling thread.
+    /// </remarks>
     [ThreadStatic]
     private static List<string>? t_sdkDirs;
 
@@ -353,12 +395,12 @@ public static unsafe class HostFxr
         var handle = GCHandle.Alloc(new StrongBox<FrameworkResolutionResult?>(null));
 
         nint pathPtr = PlatformStringMarshaller.ConvertToUnmanaged(runtimeConfigPath);
+        nint rootPtr = dotnetRoot is not null ? PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot) : 0;
 
         nint paramsPtr = 0;
         HostFxrInitializeParameters initParams = default;
-        if (dotnetRoot is not null)
+        if (rootPtr != 0)
         {
-            nint rootPtr = PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot);
             initParams = HostFxrInitializeParameters.Create(0, rootPtr);
             paramsPtr = (nint)(&initParams);
         }
@@ -371,8 +413,7 @@ public static unsafe class HostFxr
         finally
         {
             PlatformStringMarshaller.Free(pathPtr);
-            if (dotnetRoot is not null)
-                PlatformStringMarshaller.Free(initParams.DotnetRoot);
+            PlatformStringMarshaller.Free(rootPtr);
             handle.Free();
         }
 
@@ -402,57 +443,17 @@ public static unsafe class HostFxr
         box.Value = new FrameworkResolutionResult { Resolved = resolved, Unresolved = unresolved };
     }
 
+    /// <summary>
+    /// Begin capturing hostfxr error messages. Dispose to restore the previous writer.
+    /// </summary>
+    public static ErrorCapture CaptureErrors() => new();
+
     // ========================================================================
     // Library discovery & loading
     // ========================================================================
 
-    private static void EnsureInitialized()
+    private static string? FindHostFxrPath()
     {
-        if (s_initialized) return;
-        s_initialized = true;
-
-        s_dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-
-        if (string.IsNullOrEmpty(s_dotnetRoot))
-        {
-            string dotnetExe = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-            string? pathVar = Environment.GetEnvironmentVariable("PATH");
-            if (pathVar is not null)
-            {
-                char sep = OperatingSystem.IsWindows() ? ';' : ':';
-                foreach (string dir in pathVar.Split(sep, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    string candidate = Path.Combine(dir, dotnetExe);
-                    if (File.Exists(candidate))
-                    {
-                        var info = new FileInfo(candidate);
-                        string resolved = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
-                            ?? candidate;
-                        s_dotnetRoot = Path.GetDirectoryName(resolved);
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (string.IsNullOrEmpty(s_dotnetRoot))
-        {
-            if (OperatingSystem.IsMacOS())
-                s_dotnetRoot = "/usr/local/share/dotnet";
-            else if (OperatingSystem.IsWindows())
-                s_dotnetRoot = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
-            else
-                s_dotnetRoot = "/usr/share/dotnet";
-        }
-    }
-
-    /// <summary>
-    /// Locate the highest-versioned hostfxr library.
-    /// </summary>
-    public static string? FindHostFxrPath()
-    {
-        EnsureInitialized();
         if (s_dotnetRoot is null) return null;
 
         string fxrDir = Path.Combine(s_dotnetRoot, "host", "fxr");
