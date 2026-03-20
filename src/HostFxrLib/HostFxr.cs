@@ -317,15 +317,13 @@ public static unsafe class HostFxr
         try
         {
             GetAvailableSdks(exeDirPtr, &OnAvailableSdks);
+            return t_sdkDirs.ToArray();
         }
         finally
         {
             PlatformStringMarshaller.Free(exeDirPtr);
+            t_sdkDirs = null;
         }
-
-        var result = t_sdkDirs.ToArray();
-        t_sdkDirs = null;
-        return result;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -348,6 +346,7 @@ public static unsafe class HostFxr
     /// </summary>
     public static FrameworkResolutionResult ResolveFrameworks(string runtimeConfigPath, string? dotnetRoot = null)
     {
+        ArgumentNullException.ThrowIfNull(runtimeConfigPath);
         ThrowIfNotLoaded();
 
         FrameworkResolutionResult? result = null;
@@ -427,9 +426,8 @@ public static unsafe class HostFxr
                     if (File.Exists(candidate))
                     {
                         var info = new FileInfo(candidate);
-                        string resolved = info.LinkTarget is not null
-                            ? Path.GetFullPath(Path.Combine(dir, info.LinkTarget))
-                            : candidate;
+                        string resolved = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                            ?? candidate;
                         s_dotnetRoot = Path.GetDirectoryName(resolved);
                         break;
                     }
@@ -461,7 +459,7 @@ public static unsafe class HostFxr
         if (!Directory.Exists(fxrDir)) return null;
 
         string? best = Directory.GetDirectories(fxrDir)
-            .OrderByDescending(d => Path.GetFileName(d))
+            .OrderByDescending(d => Version.TryParse(Path.GetFileName(d), out var v) ? v : new Version())
             .FirstOrDefault();
 
         if (best is null) return null;
