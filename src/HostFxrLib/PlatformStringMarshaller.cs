@@ -43,6 +43,7 @@ public static unsafe class PlatformStringMarshaller
 
 /// <summary>
 /// Lightweight wrapper for reading platform-dependent string pointers from native memory.
+/// A null pointer converts to <see cref="string.Empty"/>, not <c>null</c>.
 /// </summary>
 public readonly struct PlatformString
 {

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -57,10 +58,11 @@ public static unsafe class HostFxr
             if (path is not null)
                 NativeLibrary.TryLoad(path, out s_handle);
         }
-        catch
+        catch (Exception ex)
         {
             // Swallow filesystem/permission errors so the type remains usable.
             // IsLoaded will be false and callers can check that.
+            Debug.WriteLine($"HostFxr: failed to load hostfxr: {ex.Message}");
         }
     }
 
@@ -399,7 +401,7 @@ public static unsafe class HostFxr
         ArgumentNullException.ThrowIfNull(runtimeConfigPath);
         ThrowIfNotLoaded();
 
-        FrameworkResolutionResult? result = null;
+        var result = new FrameworkResolutionResult();
         var handle = GCHandle.Alloc(new StrongBox<FrameworkResolutionResult?>(null));
 
         nint pathPtr = PlatformStringMarshaller.ConvertToUnmanaged(runtimeConfigPath);
@@ -416,7 +418,7 @@ public static unsafe class HostFxr
         try
         {
             int rc = ResolveFrameworksForRuntimeConfig(pathPtr, paramsPtr, &OnResolveFrameworks, (nint)handle);
-            result = ((StrongBox<FrameworkResolutionResult?>)handle.Target!).Value ?? new FrameworkResolutionResult();
+            result = ((StrongBox<FrameworkResolutionResult?>)handle.Target!).Value ?? result;
             result.StatusCode = rc;
         }
         finally
@@ -435,18 +437,18 @@ public static unsafe class HostFxr
         ref var r = ref Unsafe.AsRef<ResolveFrameworksResult>((void*)resultPtr);
         var box = (StrongBox<FrameworkResolutionResult?>)GCHandle.FromIntPtr(context).Target!;
 
-        var resolved = new ResolvedFramework[(int)r.ResolvedCount];
+        var resolved = new FrameworkEntry[(int)r.ResolvedCount];
         for (int i = 0; i < resolved.Length; i++)
         {
             ref var fw = ref r.ResolvedFrameworks[i];
-            resolved[i] = new ResolvedFramework(fw.Name, fw.RequestedVersion, fw.ResolvedVersion, fw.ResolvedPath);
+            resolved[i] = new FrameworkEntry(fw.Name, fw.RequestedVersion, fw.ResolvedVersion, fw.ResolvedPath);
         }
 
-        var unresolved = new ResolvedFramework[(int)r.UnresolvedCount];
+        var unresolved = new FrameworkEntry[(int)r.UnresolvedCount];
         for (int i = 0; i < unresolved.Length; i++)
         {
             ref var fw = ref r.UnresolvedFrameworks[i];
-            unresolved[i] = new ResolvedFramework(fw.Name, fw.RequestedVersion, fw.ResolvedVersion, fw.ResolvedPath);
+            unresolved[i] = new FrameworkEntry(fw.Name, fw.RequestedVersion, fw.ResolvedVersion, fw.ResolvedPath);
         }
 
         box.Value = new FrameworkResolutionResult { Resolved = resolved, Unresolved = unresolved };

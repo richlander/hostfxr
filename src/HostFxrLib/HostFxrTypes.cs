@@ -142,6 +142,30 @@ public unsafe struct ResolveFrameworksResult
     public FrameworkResult* UnresolvedFrameworks;
 }
 
+// ---- Status codes ----
+
+/// <summary>
+/// Helpers and well-known constants for hostfxr status codes.
+/// </summary>
+public static class HostFxrStatus
+{
+    // Success codes (non-negative)
+    public const int Success = 0;
+    public const int SuccessHostAlreadyInitialized = 1;
+    public const int SuccessDifferentRuntimeProperties = 2;
+
+    // Common error codes
+    public const int InvalidArgFailure = unchecked((int)0x80008081);
+    public const int CoreHostLibLoadFailure = unchecked((int)0x80008082);
+    public const int CoreHostLibMissingFailure = unchecked((int)0x80008083);
+    public const int CoreHostEntryPointFailure = unchecked((int)0x80008084);
+    public const int CoreHostCurHostFindFailure = unchecked((int)0x80008085);
+    public const int FrameworkMissingFailure = unchecked((int)0x80008098);
+
+    /// <summary>Returns true when the status code indicates success (non-negative).</summary>
+    public static bool IsSuccess(int statusCode) => statusCode >= 0;
+}
+
 // ---- High-level result types ----
 
 /// <summary>
@@ -186,14 +210,14 @@ public sealed class FrameworkResolutionResult
 {
     internal FrameworkResolutionResult() { }
     public int StatusCode { get; internal set; }
-    public IReadOnlyList<ResolvedFramework> Resolved { get; init; } = [];
-    public IReadOnlyList<ResolvedFramework> Unresolved { get; init; } = [];
+    public IReadOnlyList<FrameworkEntry> Resolved { get; init; } = [];
+    public IReadOnlyList<FrameworkEntry> Unresolved { get; init; } = [];
 }
 
 /// <summary>
 /// A single resolved or unresolved framework entry.
 /// </summary>
-public sealed record ResolvedFramework(string Name, string RequestedVersion, string ResolvedVersion, string ResolvedPath);
+public sealed record FrameworkEntry(string Name, string RequestedVersion, string ResolvedVersion, string ResolvedPath);
 
 /// <summary>
 /// Result of querying available SDKs via <see cref="HostFxr.GetAvailableSdkDirs"/>.
@@ -221,10 +245,13 @@ public sealed class HostContextHandle : IDisposable
     /// <summary>Whether the handle is valid (non-zero and not disposed).</summary>
     public bool IsValid => _handle != 0;
 
+    ~HostContextHandle() => Dispose();
+
     public void Dispose()
     {
         nint h = Interlocked.Exchange(ref _handle, 0);
         if (h != 0)
             HostFxr.Close(h);
+        GC.SuppressFinalize(this);
     }
 }

@@ -7,6 +7,11 @@ namespace HostFxrLib;
 /// Captures hostfxr error messages for the lifetime of the scope.
 /// Use <see cref="Drain"/> after each hostfxr call to get messages for that call.
 /// </summary>
+/// <remarks>
+/// Captures can be nested but must be disposed in LIFO (stack) order.
+/// Use <c>using</c> statements to guarantee correct ordering.
+/// Disposing out of order will corrupt the capture chain and restore the wrong error writer.
+/// </remarks>
 public sealed unsafe class ErrorCapture : IDisposable
 {
     [ThreadStatic]
