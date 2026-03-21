@@ -1,4 +1,3 @@
-#:property AllowUnsafeBlocks=true
 #:project ../src/HostFxrLib/HostFxrLib.csproj
 
 using HostFxrLib;
@@ -63,11 +62,10 @@ try
     // 2. Missing framework version — hostfxr lists what's installed
     Console.WriteLine();
     Console.WriteLine("2. Initialize with Microsoft.NETCore.App v99.0.0 (missing version)");
-    int rc2 = InitializeForConfig(missingVersionConfig, out nint handle2);
+    using var ctx2 = HostFxr.InitializeForRuntimeConfig(missingVersionConfig);
     string[] msgs2 = errors.Drain();
-    Console.WriteLine($"   rc=0x{rc2:X8}");
+    Console.WriteLine($"   rc=0x{ctx2.StatusCode:X8}");
     PrintErrors(msgs2);
-    if (handle2 != 0) HostFxr.Close(handle2);
 
     // 3. Another successful call — proves Drain() cleared the previous errors
     Console.WriteLine();
@@ -79,20 +77,18 @@ try
     // 4. Bogus framework name — different error than #2
     Console.WriteLine();
     Console.WriteLine("4. Initialize with Microsoft.BogusFramework.App (unknown framework)");
-    int rc4 = InitializeForConfig(bogusFrameworkConfig, out nint handle4);
+    using var ctx4 = HostFxr.InitializeForRuntimeConfig(bogusFrameworkConfig);
     string[] msgs4 = errors.Drain();
-    Console.WriteLine($"   rc=0x{rc4:X8}");
+    Console.WriteLine($"   rc=0x{ctx4.StatusCode:X8}");
     PrintErrors(msgs4);
-    if (handle4 != 0) HostFxr.Close(handle4);
 
     // 5. Config file doesn't exist at all
     Console.WriteLine();
     Console.WriteLine("5. Initialize with non-existent config file");
-    int rc5 = InitializeForConfig(nonExistentConfig, out nint handle5);
+    using var ctx5 = HostFxr.InitializeForRuntimeConfig(nonExistentConfig);
     string[] msgs5 = errors.Drain();
-    Console.WriteLine($"   rc=0x{rc5:X8}");
+    Console.WriteLine($"   rc=0x{ctx5.StatusCode:X8}");
     PrintErrors(msgs5);
-    if (handle5 != 0) HostFxr.Close(handle5);
 }
 finally
 {
@@ -100,22 +96,6 @@ finally
 }
 
 return 0;
-
-static unsafe int InitializeForConfig(string configPath, out nint handle)
-{
-    nint pathPtr = PlatformStringMarshaller.ConvertToUnmanaged(configPath);
-    try
-    {
-        nint h = 0;
-        int rc = HostFxr.InitializeForRuntimeConfig(pathPtr, null, &h);
-        handle = h;
-        return rc;
-    }
-    finally
-    {
-        PlatformStringMarshaller.Free(pathPtr);
-    }
-}
 
 static void PrintErrors(string[] messages)
 {

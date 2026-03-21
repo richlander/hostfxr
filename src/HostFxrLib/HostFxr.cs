@@ -6,14 +6,14 @@ namespace HostFxrLib;
 
 /// <summary>
 /// Provides access to all hostfxr native APIs.
-/// Loads the library dynamically via NativeLibrary for NativeAOT compatibility.
+/// Uses LibraryImport with a custom DLL import resolver for NativeAOT compatibility.
 /// </summary>
-public static unsafe class HostFxr
+public static unsafe partial class HostFxr
 {
-    private static string? s_dotnetRoot;
+    private const string LibName = "hostfxr";
 
-    // Intentionally never freed — hostfxr lives for the process lifetime.
-    private static nint s_handle;
+    private static string? s_dotnetRoot;
+    private static bool s_loaded;
 
     static HostFxr()
     {
@@ -54,9 +54,15 @@ public static unsafe class HostFxr
                     s_dotnetRoot = "/usr/share/dotnet";
             }
 
-            string? path = FindHostFxrPath();
-            if (path is not null)
-                NativeLibrary.TryLoad(path, out s_handle);
+            string? libPath = FindHostFxrPath();
+            if (libPath is not null && NativeLibrary.TryLoad(libPath, out nint handle))
+            {
+                s_loaded = true;
+                // Route all LibraryImport("hostfxr") calls to the discovered library.
+                NativeLibrary.SetDllImportResolver(
+                    typeof(HostFxr).Assembly,
+                    (name, assembly, searchPath) => name == LibName ? handle : 0);
+            }
         }
         catch (Exception ex)
         {
@@ -70,162 +76,118 @@ public static unsafe class HostFxr
     public static string? DotnetRoot => s_dotnetRoot;
 
     /// <summary>Whether hostfxr was successfully loaded.</summary>
-    public static bool IsLoaded => s_handle != 0;
+    public static bool IsLoaded => s_loaded;
 
     // ========================================================================
-    // Raw API wrappers — all 18 hostfxr exports
+    // Raw API wrappers — all 18 hostfxr exports via LibraryImport
     // ========================================================================
 
     // 1. hostfxr_main
-    public static int Main(int argc, nint argv)
-    {
-        nint fn = GetExport("hostfxr_main");
-        return ((delegate* unmanaged[Cdecl]<int, nint, int>)fn)(argc, argv);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_main")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int Main(int argc, nint argv);
 
     // 2. hostfxr_main_startupinfo
-    public static int MainStartupInfo(int argc, nint argv, nint hostPath, nint dotnetRoot, nint appPath)
-    {
-        nint fn = GetExport("hostfxr_main_startupinfo");
-        return ((delegate* unmanaged[Cdecl]<int, nint, nint, nint, nint, int>)fn)(
-            argc, argv, hostPath, dotnetRoot, appPath);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_main_startupinfo",
+        StringMarshalling = StringMarshalling.Custom, StringMarshallingCustomType = typeof(PlatformStringMarshaller))]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int MainStartupInfo(int argc, nint argv,
+        string hostPath, string dotnetRoot, string appPath);
 
     // 3. hostfxr_main_bundle_startupinfo
-    public static int MainBundleStartupInfo(int argc, nint argv, nint hostPath, nint dotnetRoot, nint appPath, long bundleHeaderOffset)
-    {
-        nint fn = GetExport("hostfxr_main_bundle_startupinfo");
-        return ((delegate* unmanaged[Cdecl]<int, nint, nint, nint, nint, long, int>)fn)(
-            argc, argv, hostPath, dotnetRoot, appPath, bundleHeaderOffset);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_main_bundle_startupinfo",
+        StringMarshalling = StringMarshalling.Custom, StringMarshallingCustomType = typeof(PlatformStringMarshaller))]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int MainBundleStartupInfo(int argc, nint argv,
+        string hostPath, string dotnetRoot, string appPath, long bundleHeaderOffset);
 
     // 4. hostfxr_resolve_sdk (obsolete — use ResolveSdk2)
     [Obsolete("Use ResolveSdk2 instead")]
-    public static int ResolveSdk(nint exeDir, nint workingDir, nint buffer, int bufferSize)
-    {
-        nint fn = GetExport("hostfxr_resolve_sdk");
-        return ((delegate* unmanaged[Cdecl]<nint, nint, nint, int, int>)fn)(
-            exeDir, workingDir, buffer, bufferSize);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_resolve_sdk")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int ResolveSdk(nint exeDir, nint workingDir, nint buffer, int bufferSize);
 
     // 5. hostfxr_resolve_sdk2
-    public static int ResolveSdk2(nint exeDir, nint workingDir, int flags,
-        delegate* unmanaged[Cdecl]<int, nint, void> result)
-    {
-        nint fn = GetExport("hostfxr_resolve_sdk2");
-        return ((delegate* unmanaged[Cdecl]<nint, nint, int,
-            delegate* unmanaged[Cdecl]<int, nint, void>, int>)fn)(
-            exeDir, workingDir, flags, result);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_resolve_sdk2",
+        StringMarshalling = StringMarshalling.Custom, StringMarshallingCustomType = typeof(PlatformStringMarshaller))]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int ResolveSdk2(string? exeDir, string? workingDir, int flags,
+        delegate* unmanaged[Cdecl]<int, nint, void> result);
 
     // 6. hostfxr_get_available_sdks
-    public static int GetAvailableSdks(nint exeDir,
-        delegate* unmanaged[Cdecl]<int, nint, void> result)
-    {
-        nint fn = GetExport("hostfxr_get_available_sdks");
-        return ((delegate* unmanaged[Cdecl]<nint,
-            delegate* unmanaged[Cdecl]<int, nint, void>, int>)fn)(exeDir, result);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_get_available_sdks",
+        StringMarshalling = StringMarshalling.Custom, StringMarshallingCustomType = typeof(PlatformStringMarshaller))]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int GetAvailableSdks(string? exeDir,
+        delegate* unmanaged[Cdecl]<int, nint, void> result);
 
     // 7. hostfxr_get_dotnet_environment_info
-    public static int GetDotnetEnvironmentInfo(nint dotnetRoot, nint reserved,
-        delegate* unmanaged[Cdecl]<nint, nint, void> result, nint resultContext)
-    {
-        nint fn = GetExport("hostfxr_get_dotnet_environment_info");
-        return ((delegate* unmanaged[Cdecl]<nint, nint,
-            delegate* unmanaged[Cdecl]<nint, nint, void>, nint, int>)fn)(
-            dotnetRoot, reserved, result, resultContext);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_get_dotnet_environment_info",
+        StringMarshalling = StringMarshalling.Custom, StringMarshallingCustomType = typeof(PlatformStringMarshaller))]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int GetDotnetEnvironmentInfo(string? dotnetRoot, nint reserved,
+        delegate* unmanaged[Cdecl]<nint, nint, void> result, nint resultContext);
 
     // 8. hostfxr_get_native_search_directories
-    public static int GetNativeSearchDirectories(int argc, nint argv, nint buffer, int bufferSize, int* requiredBufferSize)
-    {
-        nint fn = GetExport("hostfxr_get_native_search_directories");
-        return ((delegate* unmanaged[Cdecl]<int, nint, nint, int, int*, int>)fn)(
-            argc, argv, buffer, bufferSize, requiredBufferSize);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_get_native_search_directories")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int GetNativeSearchDirectories(int argc, nint argv,
+        nint buffer, int bufferSize, int* requiredBufferSize);
 
     // 9. hostfxr_set_error_writer
-    public static nint SetErrorWriter(delegate* unmanaged[Cdecl]<nint, void> errorWriter)
-    {
-        nint fn = GetExport("hostfxr_set_error_writer");
-        return ((delegate* unmanaged[Cdecl]<
-            delegate* unmanaged[Cdecl]<nint, void>, nint>)fn)(errorWriter);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_set_error_writer")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial nint SetErrorWriter(delegate* unmanaged[Cdecl]<nint, void> errorWriter);
 
     // 10. hostfxr_initialize_for_dotnet_command_line
-    public static int InitializeForDotnetCommandLine(int argc, nint argv,
-        HostFxrInitializeParameters* parameters, nint* hostContextHandle)
-    {
-        nint fn = GetExport("hostfxr_initialize_for_dotnet_command_line");
-        return ((delegate* unmanaged[Cdecl]<int, nint, HostFxrInitializeParameters*, nint*, int>)fn)(
-            argc, argv, parameters, hostContextHandle);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_initialize_for_dotnet_command_line")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int InitializeForDotnetCommandLine(int argc, nint argv,
+        HostFxrInitializeParameters* parameters, nint* hostContextHandle);
 
     // 11. hostfxr_initialize_for_runtime_config
-    public static int InitializeForRuntimeConfig(nint runtimeConfigPath,
-        HostFxrInitializeParameters* parameters, nint* hostContextHandle)
-    {
-        nint fn = GetExport("hostfxr_initialize_for_runtime_config");
-        return ((delegate* unmanaged[Cdecl]<nint, HostFxrInitializeParameters*, nint*, int>)fn)(
-            runtimeConfigPath, parameters, hostContextHandle);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_initialize_for_runtime_config")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int InitializeForRuntimeConfig(nint runtimeConfigPath,
+        HostFxrInitializeParameters* parameters, nint* hostContextHandle);
 
     // 12. hostfxr_resolve_frameworks_for_runtime_config
-    public static int ResolveFrameworksForRuntimeConfig(nint runtimeConfigPath, nint parameters,
-        delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint resultContext)
-    {
-        nint fn = GetExport("hostfxr_resolve_frameworks_for_runtime_config");
-        return ((delegate* unmanaged[Cdecl]<nint, nint,
-            delegate* unmanaged[Cdecl]<nint, nint, void>, nint, int>)fn)(
-            runtimeConfigPath, parameters, callback, resultContext);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_resolve_frameworks_for_runtime_config",
+        StringMarshalling = StringMarshalling.Custom, StringMarshallingCustomType = typeof(PlatformStringMarshaller))]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int ResolveFrameworksForRuntimeConfig(string runtimeConfigPath, nint parameters,
+        delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint resultContext);
 
     // 13. hostfxr_run_app
-    public static int RunApp(nint hostContextHandle)
-    {
-        nint fn = GetExport("hostfxr_run_app");
-        return ((delegate* unmanaged[Cdecl]<nint, int>)fn)(hostContextHandle);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_run_app")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int RunApp(nint hostContextHandle);
 
     // 14. hostfxr_get_runtime_delegate
-    public static int GetRuntimeDelegate(nint hostContextHandle, int type, nint* @delegate)
-    {
-        nint fn = GetExport("hostfxr_get_runtime_delegate");
-        return ((delegate* unmanaged[Cdecl]<nint, int, nint*, int>)fn)(
-            hostContextHandle, type, @delegate);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_get_runtime_delegate")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int GetRuntimeDelegate(nint hostContextHandle, int type, nint* @delegate);
 
     // 15. hostfxr_get_runtime_property_value
-    public static int GetRuntimePropertyValue(nint hostContextHandle, nint name, nint* value)
-    {
-        nint fn = GetExport("hostfxr_get_runtime_property_value");
-        return ((delegate* unmanaged[Cdecl]<nint, nint, nint*, int>)fn)(
-            hostContextHandle, name, value);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_get_runtime_property_value")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int GetRuntimePropertyValue(nint hostContextHandle, nint name, nint* value);
 
     // 16. hostfxr_set_runtime_property_value
-    public static int SetRuntimePropertyValue(nint hostContextHandle, nint name, nint value)
-    {
-        nint fn = GetExport("hostfxr_set_runtime_property_value");
-        return ((delegate* unmanaged[Cdecl]<nint, nint, nint, int>)fn)(
-            hostContextHandle, name, value);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_set_runtime_property_value")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int SetRuntimePropertyValue(nint hostContextHandle, nint name, nint value);
 
     // 17. hostfxr_get_runtime_properties
-    public static int GetRuntimeProperties(nint hostContextHandle, nuint* count, nint* keys, nint* values)
-    {
-        nint fn = GetExport("hostfxr_get_runtime_properties");
-        return ((delegate* unmanaged[Cdecl]<nint, nuint*, nint*, nint*, int>)fn)(
-            hostContextHandle, count, keys, values);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_get_runtime_properties")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int GetRuntimeProperties(nint hostContextHandle,
+        nuint* count, nint* keys, nint* values);
 
     // 18. hostfxr_close
-    public static int Close(nint hostContextHandle)
-    {
-        nint fn = GetExport("hostfxr_close");
-        return ((delegate* unmanaged[Cdecl]<nint, int>)fn)(hostContextHandle);
-    }
+    [LibraryImport(LibName, EntryPoint = "hostfxr_close")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int Close(nint hostContextHandle);
 
     // ========================================================================
     // High-level managed APIs
@@ -237,21 +199,18 @@ public static unsafe class HostFxr
     public static EnvironmentInfo GetEnvironmentInfo(string? dotnetRoot = null)
     {
         ThrowIfNotLoaded();
-
         dotnetRoot ??= s_dotnetRoot;
 
         var handle = GCHandle.Alloc(new StrongBox<EnvironmentInfo?>(null));
-        nint rootPtr = dotnetRoot is not null ? PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot) : 0;
         try
         {
-            int rc = GetDotnetEnvironmentInfo(rootPtr, 0, &OnEnvironmentInfo, (nint)handle);
+            int rc = GetDotnetEnvironmentInfo(dotnetRoot, 0, &OnEnvironmentInfo, (nint)handle);
             var result = ((StrongBox<EnvironmentInfo?>)handle.Target!).Value ?? new EnvironmentInfo();
             result.StatusCode = rc;
             return result;
         }
         finally
         {
-            PlatformStringMarshaller.Free(rootPtr);
             handle.Free();
         }
     }
@@ -303,16 +262,12 @@ public static unsafe class HostFxr
         var result = new SdkResolutionResult();
         t_sdkResult = result;
 
-        nint exeDirPtr = exeDir is not null ? PlatformStringMarshaller.ConvertToUnmanaged(exeDir) : 0;
-        nint workingDirPtr = workingDir is not null ? PlatformStringMarshaller.ConvertToUnmanaged(workingDir) : 0;
         try
         {
-            result.StatusCode = ResolveSdk2(exeDirPtr, workingDirPtr, (int)flags, &OnResolveSdk2Result);
+            result.StatusCode = ResolveSdk2(exeDir, workingDir, (int)flags, &OnResolveSdk2Result);
         }
         finally
         {
-            PlatformStringMarshaller.Free(exeDirPtr);
-            PlatformStringMarshaller.Free(workingDirPtr);
             t_sdkResult = null;
         }
 
@@ -365,15 +320,13 @@ public static unsafe class HostFxr
         ThrowIfNotLoaded();
 
         t_sdkDirs = [];
-        nint exeDirPtr = exeDir is not null ? PlatformStringMarshaller.ConvertToUnmanaged(exeDir) : 0;
         try
         {
-            int rc = GetAvailableSdks(exeDirPtr, &OnAvailableSdks);
+            int rc = GetAvailableSdks(exeDir, &OnAvailableSdks);
             return new AvailableSdksResult { StatusCode = rc, SdkDirs = t_sdkDirs.ToArray() };
         }
         finally
         {
-            PlatformStringMarshaller.Free(exeDirPtr);
             t_sdkDirs = null;
         }
     }
@@ -402,9 +355,8 @@ public static unsafe class HostFxr
         ThrowIfNotLoaded();
 
         var result = new FrameworkResolutionResult();
-        var handle = GCHandle.Alloc(new StrongBox<FrameworkResolutionResult?>(null));
+        var gcHandle = GCHandle.Alloc(new StrongBox<FrameworkResolutionResult?>(null));
 
-        nint pathPtr = PlatformStringMarshaller.ConvertToUnmanaged(runtimeConfigPath);
         nint rootPtr = dotnetRoot is not null ? PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot) : 0;
 
         nint paramsPtr = 0;
@@ -417,15 +369,15 @@ public static unsafe class HostFxr
 
         try
         {
-            int rc = ResolveFrameworksForRuntimeConfig(pathPtr, paramsPtr, &OnResolveFrameworks, (nint)handle);
-            result = ((StrongBox<FrameworkResolutionResult?>)handle.Target!).Value ?? result;
+            int rc = ResolveFrameworksForRuntimeConfig(runtimeConfigPath, paramsPtr,
+                &OnResolveFrameworks, (nint)gcHandle);
+            result = ((StrongBox<FrameworkResolutionResult?>)gcHandle.Target!).Value ?? result;
             result.StatusCode = rc;
         }
         finally
         {
-            PlatformStringMarshaller.Free(pathPtr);
             PlatformStringMarshaller.Free(rootPtr);
-            handle.Free();
+            gcHandle.Free();
         }
 
         return result;
@@ -455,12 +407,87 @@ public static unsafe class HostFxr
     }
 
     /// <summary>
+    /// Initialize a host context for a runtime config, returning a managed handle.
+    /// </summary>
+    public static HostContextHandle InitializeForRuntimeConfig(string runtimeConfigPath,
+        string? hostPath = null, string? dotnetRoot = null)
+    {
+        ThrowIfNotLoaded();
+        ArgumentNullException.ThrowIfNull(runtimeConfigPath);
+
+        nint configPtr = PlatformStringMarshaller.ConvertToUnmanaged(runtimeConfigPath);
+        nint hostPathPtr = hostPath is not null ? PlatformStringMarshaller.ConvertToUnmanaged(hostPath) : 0;
+        nint dotnetRootPtr = dotnetRoot is not null ? PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot) : 0;
+
+        try
+        {
+            HostFxrInitializeParameters* paramsPtr = null;
+            HostFxrInitializeParameters initParams = default;
+            if (hostPathPtr != 0 || dotnetRootPtr != 0)
+            {
+                initParams = HostFxrInitializeParameters.Create(hostPathPtr, dotnetRootPtr);
+                paramsPtr = &initParams;
+            }
+
+            nint handle = 0;
+            int rc = InitializeForRuntimeConfig(configPtr, paramsPtr, &handle);
+            return new HostContextHandle(handle, rc);
+        }
+        finally
+        {
+            PlatformStringMarshaller.Free(configPtr);
+            PlatformStringMarshaller.Free(hostPathPtr);
+            PlatformStringMarshaller.Free(dotnetRootPtr);
+        }
+    }
+
+    /// <summary>
+    /// Initialize a host context for dotnet command line execution, returning a managed handle.
+    /// </summary>
+    public static HostContextHandle InitializeForCommandLine(string[] args,
+        string? hostPath = null, string? dotnetRoot = null)
+    {
+        ThrowIfNotLoaded();
+        ArgumentNullException.ThrowIfNull(args);
+
+        nint hostPathPtr = hostPath is not null ? PlatformStringMarshaller.ConvertToUnmanaged(hostPath) : 0;
+        nint dotnetRootPtr = dotnetRoot is not null ? PlatformStringMarshaller.ConvertToUnmanaged(dotnetRoot) : 0;
+
+        int argc = args.Length;
+        nint* argv = stackalloc nint[argc];
+        for (int i = 0; i < argc; i++)
+            argv[i] = PlatformStringMarshaller.ConvertToUnmanaged(args[i]);
+
+        try
+        {
+            HostFxrInitializeParameters* paramsPtr = null;
+            HostFxrInitializeParameters initParams = default;
+            if (hostPathPtr != 0 || dotnetRootPtr != 0)
+            {
+                initParams = HostFxrInitializeParameters.Create(hostPathPtr, dotnetRootPtr);
+                paramsPtr = &initParams;
+            }
+
+            nint handle = 0;
+            int rc = InitializeForDotnetCommandLine(argc, (nint)argv, paramsPtr, &handle);
+            return new HostContextHandle(handle, rc);
+        }
+        finally
+        {
+            for (int i = 0; i < argc; i++)
+                PlatformStringMarshaller.Free(argv[i]);
+            PlatformStringMarshaller.Free(hostPathPtr);
+            PlatformStringMarshaller.Free(dotnetRootPtr);
+        }
+    }
+
+    /// <summary>
     /// Begin capturing hostfxr error messages. Dispose to restore the previous writer.
     /// </summary>
     public static ErrorCapture CaptureErrors() => new();
 
     // ========================================================================
-    // Library discovery & loading
+    // Library discovery
     // ========================================================================
 
     private static string? FindHostFxrPath()
@@ -488,19 +515,9 @@ public static unsafe class HostFxr
     // Internal helpers
     // ========================================================================
 
-    private static nint GetExport(string name)
-    {
-        ThrowIfNotLoaded();
-
-        if (!NativeLibrary.TryGetExport(s_handle, name, out nint fn))
-            throw new EntryPointNotFoundException($"hostfxr export not found: {name}");
-
-        return fn;
-    }
-
     private static void ThrowIfNotLoaded()
     {
-        if (s_handle == 0)
+        if (!s_loaded)
             throw new DllNotFoundException(
                 "hostfxr could not be loaded. Ensure .NET is installed and DOTNET_ROOT is set.");
     }

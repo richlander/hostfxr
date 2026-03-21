@@ -265,13 +265,108 @@ public sealed class HostContextHandle : IDisposable
 {
     private nint _handle;
 
-    internal HostContextHandle(nint handle) => _handle = handle;
+    internal HostContextHandle(nint handle, int statusCode)
+    {
+        _handle = handle;
+        StatusCode = statusCode;
+    }
+
+    /// <summary>The status code from the initialization call.</summary>
+    public int StatusCode { get; }
 
     /// <summary>The raw handle value, or zero if disposed.</summary>
     public nint Value => _handle;
 
     /// <summary>Whether the handle is valid (non-zero and not disposed).</summary>
     public bool IsValid => _handle != 0;
+
+    /// <summary>Run the application associated with this host context.</summary>
+    public int RunApp()
+    {
+        ObjectDisposedException.ThrowIf(_handle == 0, this);
+        return HostFxr.RunApp(_handle);
+    }
+
+    /// <summary>Get a runtime delegate of the specified type.</summary>
+    public unsafe int GetRuntimeDelegate(HostFxrDelegateType type, out nint @delegate)
+    {
+        ObjectDisposedException.ThrowIf(_handle == 0, this);
+        nint del = 0;
+        int rc = HostFxr.GetRuntimeDelegate(_handle, (int)type, &del);
+        @delegate = del;
+        return rc;
+    }
+
+    /// <summary>Get the value of a runtime property.</summary>
+    public unsafe int GetRuntimePropertyValue(string name, out string? value)
+    {
+        ObjectDisposedException.ThrowIf(_handle == 0, this);
+        nint namePtr = PlatformStringMarshaller.ConvertToUnmanaged(name);
+        try
+        {
+            nint val = 0;
+            int rc = HostFxr.GetRuntimePropertyValue(_handle, namePtr, &val);
+            value = HostFxrStatus.IsSuccess(rc) ? PlatformStringMarshaller.ConvertToManaged(val) : null;
+            return rc;
+        }
+        finally
+        {
+            PlatformStringMarshaller.Free(namePtr);
+        }
+    }
+
+    /// <summary>Set the value of a runtime property. Pass null to remove it.</summary>
+    public int SetRuntimePropertyValue(string name, string? value)
+    {
+        ObjectDisposedException.ThrowIf(_handle == 0, this);
+        nint namePtr = PlatformStringMarshaller.ConvertToUnmanaged(name);
+        nint valuePtr = value is not null ? PlatformStringMarshaller.ConvertToUnmanaged(value) : 0;
+        try
+        {
+            return HostFxr.SetRuntimePropertyValue(_handle, namePtr, valuePtr);
+        }
+        finally
+        {
+            PlatformStringMarshaller.Free(namePtr);
+            PlatformStringMarshaller.Free(valuePtr);
+        }
+    }
+
+    /// <summary>Get all runtime properties for this host context.</summary>
+    public unsafe int GetRuntimeProperties(out IReadOnlyDictionary<string, string> properties)
+    {
+        ObjectDisposedException.ThrowIf(_handle == 0, this);
+
+        nuint count = 0;
+        int rc = HostFxr.GetRuntimeProperties(_handle, &count, null, null);
+
+        if (rc == HostFxrStatus.HostApiBufferTooSmall && count > 0)
+        {
+            nint[] keyArr = new nint[(int)count];
+            nint[] valArr = new nint[(int)count];
+            fixed (nint* keys = keyArr)
+            fixed (nint* values = valArr)
+            {
+                rc = HostFxr.GetRuntimeProperties(_handle, &count, keys, values);
+            }
+
+            if (HostFxrStatus.IsSuccess(rc))
+            {
+                var dict = new Dictionary<string, string>((int)count);
+                for (int i = 0; i < (int)count; i++)
+                {
+                    string key = PlatformStringMarshaller.ConvertToManaged(keyArr[i]) ?? "";
+                    string val = PlatformStringMarshaller.ConvertToManaged(valArr[i]) ?? "";
+                    dict[key] = val;
+                }
+                properties = dict;
+                return rc;
+            }
+        }
+
+        properties = new Dictionary<string, string>();
+        return rc;
+    }
 
     ~HostContextHandle() => Dispose();
 
