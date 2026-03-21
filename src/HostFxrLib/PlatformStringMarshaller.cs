@@ -7,6 +7,7 @@ namespace HostFxrLib;
 /// Platform-aware string marshaller for hostfxr interop.
 /// Uses UTF-16 on Windows and UTF-8 on Unix, matching hostfxr's char_t type.
 /// </summary>
+[CustomMarshaller(typeof(string), MarshalMode.Default, typeof(PlatformStringMarshaller))]
 public static unsafe class PlatformStringMarshaller
 {
     public static nint ConvertToUnmanaged(string? managed)
@@ -47,7 +48,7 @@ public static unsafe class PlatformStringMarshaller
 /// </summary>
 public readonly struct PlatformString
 {
-    public readonly nint Value { get; }
+    public nint Value { get; }
 
     public override readonly string ToString()
     {

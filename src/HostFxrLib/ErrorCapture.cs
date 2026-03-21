@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -60,6 +61,7 @@ public sealed unsafe class ErrorCapture : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Debug.Assert(t_current == this, "ErrorCapture disposed out of LIFO order.");
         HostFxr.SetErrorWriter((delegate* unmanaged[Cdecl]<nint, void>)_previousWriter);
         t_current = _previous;
     }
