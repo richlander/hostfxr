@@ -19,43 +19,10 @@ public static unsafe partial class HostFxr
     {
         try
         {
-            s_dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+            var discovery = NetHost.Discover();
+            s_dotnetRoot = discovery.DotnetRoot;
 
-            if (string.IsNullOrEmpty(s_dotnetRoot))
-            {
-                string dotnetExe = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-                string? pathVar = Environment.GetEnvironmentVariable("PATH");
-                if (pathVar is not null)
-                {
-                    char sep = OperatingSystem.IsWindows() ? ';' : ':';
-                    foreach (string dir in pathVar.Split(sep, StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        string candidate = Path.Combine(dir, dotnetExe);
-                        if (File.Exists(candidate))
-                        {
-                            var info = new FileInfo(candidate);
-                            string resolved = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
-                                ?? candidate;
-                            s_dotnetRoot = Path.GetDirectoryName(resolved);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (string.IsNullOrEmpty(s_dotnetRoot))
-            {
-                if (OperatingSystem.IsMacOS())
-                    s_dotnetRoot = "/usr/local/share/dotnet";
-                else if (OperatingSystem.IsWindows())
-                    s_dotnetRoot = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
-                else
-                    s_dotnetRoot = "/usr/share/dotnet";
-            }
-
-            string? libPath = FindHostFxrPath();
-            if (libPath is not null && NativeLibrary.TryLoad(libPath, out nint handle))
+            if (discovery.HostFxrPath is not null && NativeLibrary.TryLoad(discovery.HostFxrPath, out nint handle))
             {
                 s_loaded = true;
                 // Route all LibraryImport("hostfxr") calls to the discovered library.
@@ -78,6 +45,11 @@ public static unsafe partial class HostFxr
     /// <summary>Whether hostfxr was successfully loaded.</summary>
     public static bool IsLoaded => s_loaded;
 
+    /// <summary>
+    /// Discover the hostfxr library using the nethost discovery algorithm.
+    /// </summary>
+    public static DiscoveryResult Discovery(string? dotnetRoot = null) => NetHost.Discover(dotnetRoot);
+
     // ========================================================================
     // Raw API wrappers — all 18 hostfxr exports via LibraryImport
     // ========================================================================
@@ -85,7 +57,7 @@ public static unsafe partial class HostFxr
     // 1. hostfxr_main
     [LibraryImport(LibName, EntryPoint = "hostfxr_main")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial int Main(int argc, nint argv);
+    public static partial int HostFxrMain(int argc, nint argv);
 
     // 2. hostfxr_main_startupinfo
     [LibraryImport(LibName, EntryPoint = "hostfxr_main_startupinfo",
@@ -485,31 +457,6 @@ public static unsafe partial class HostFxr
     /// Begin capturing hostfxr error messages. Dispose to restore the previous writer.
     /// </summary>
     public static ErrorCapture CaptureErrors() => new();
-
-    // ========================================================================
-    // Library discovery
-    // ========================================================================
-
-    private static string? FindHostFxrPath()
-    {
-        if (s_dotnetRoot is null) return null;
-
-        string fxrDir = Path.Combine(s_dotnetRoot, "host", "fxr");
-        if (!Directory.Exists(fxrDir)) return null;
-
-        string? best = Directory.GetDirectories(fxrDir)
-            .OrderByDescending(d => Version.TryParse(Path.GetFileName(d), out var v) ? v : new Version())
-            .FirstOrDefault();
-
-        if (best is null) return null;
-
-        string libName = OperatingSystem.IsWindows() ? "hostfxr.dll" :
-                         OperatingSystem.IsMacOS() ? "libhostfxr.dylib" :
-                         "libhostfxr.so";
-
-        string libPath = Path.Combine(best, libName);
-        return File.Exists(libPath) ? libPath : null;
-    }
 
     // ========================================================================
     // Internal helpers
