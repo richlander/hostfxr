@@ -48,7 +48,7 @@ public static unsafe partial class HostFxr
     /// <summary>
     /// Discover the hostfxr library using the nethost discovery algorithm.
     /// </summary>
-    public static DiscoveryResult Discovery(string? dotnetRoot = null) => NetHost.Discover(dotnetRoot);
+    public static DiscoveryResult Discover(string? dotnetRoot = null) => NetHost.Discover(dotnetRoot);
 
     // ========================================================================
     // Raw API wrappers — all 18 hostfxr exports via LibraryImport
