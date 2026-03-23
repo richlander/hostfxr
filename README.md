@@ -43,6 +43,7 @@ if (HostFxrStatus.IsSuccess(ctx.StatusCode))
 ## API Surface
 
 **High-level APIs** (managed types, automatic marshalling):
+- `HostFxr.Discover()` — discover hostfxr via the nethost algorithm (`DiscoveryResult`)
 - `HostFxr.GetEnvironmentInfo()` — installed SDKs and runtimes
 - `HostFxr.ResolveSdkInfo()` — SDK resolution with global.json support
 - `HostFxr.GetAvailableSdkDirs()` — all installed SDK paths
@@ -50,6 +51,10 @@ if (HostFxrStatus.IsSuccess(ctx.StatusCode))
 - `HostFxr.InitializeForRuntimeConfig()` — host context for a runtime config
 - `HostFxr.InitializeForCommandLine()` — host context for command line execution
 - `HostFxr.CaptureErrors()` — scoped error message capture with `Drain()`
+
+**NetHost discovery** (managed implementation of native `get_hostfxr_path`):
+- `NetHost.Discover()` — find hostfxr using env vars, registered locations, PATH, defaults
+- `NetHost.FindHostFxrInRoot()` — find highest-versioned hostfxr in a dotnet root
 
 **HostContextHandle** instance methods:
 - `RunApp()`, `GetRuntimeDelegate()`, `GetRuntimePropertyValue()`, `SetRuntimePropertyValue()`, `GetRuntimeProperties()`
@@ -59,7 +64,7 @@ if (HostFxrStatus.IsSuccess(ctx.StatusCode))
 ## Requirements
 
 - .NET 10+
-- A .NET runtime installation (hostfxr is discovered automatically via `DOTNET_ROOT` or `PATH`)
+- A .NET runtime installation (hostfxr is discovered automatically via `DOTNET_ROOT`, registered install locations, or `PATH`)
 
 ## License
 
